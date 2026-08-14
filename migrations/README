@@ -1,0 +1,67 @@
+Generic single-database configuration.
+
+Start the PostgreSQL service
+sudo service postgresql start
+or:
+sudo systemctl start postgresql
+Create the database and user
+Switch to the postgres user:
+sudo -u postgres psql
+Inside psql, run:
+CREATE USER postgres WITH PASSWORD 'postgres';
+
+
+Switch to the postgres user:
+sudo -u postgres psql
+Inside psql, run:
+CREATE USER postgres WITH PASSWORD 'postgres';
+ALTER USER postgres WITH SUPERUSER;
+CREATE DATABASE ignition OWNER postgres;
+\q
+Make sure the server listens on localhost:5432
+The default PostgreSQL install usually does this already.
+
+
+Make sure the server listens on localhost:5432
+The default PostgreSQL install usually does this already.
+You can verify with:
+sudo ss -ltnp | grep 5432
+Set the environment variables for the backend
+In your shell:
+
+export DB_HOST=localhost
+export DB_PORT=5432
+export DB_NAME=ignition
+
+export DB_NAME=ignition
+export DB_USER=postgres
+export DB_PASSWORD=postgres
+Or create a file at backend/.env with:
+
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=ignition
+DB_USER=postgres
+DB_PASSWORD=postgres
+Verify the connection
+From the backend folder:
+cd backend
+. .venv/bin/activate
+
+dbname="ignition",
+user="postgres",
+password="postgres",
+host="localhost",
+port="5432",
+)
+print("connected")
+conn.close()
+PY
+If that succeeds, your database is ready.
+
+Next step
+Once PostgreSQL is reachable, run:
+cd backend
+. .venv/bin/activate
+alembic revision --autogenerate -m "initial_schema"
+alembic upgrade head
