@@ -1,6 +1,7 @@
 import os
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from dotenv import load_dotenv
 
@@ -87,18 +88,35 @@ class Settings:
     def database_url(self) -> str:
         if self.DATABASE_URL:
             # Render (and most managed Postgres providers) hand out
-            # postgres:// or postgresql:// — normalize to the psycopg3 driver
-            # this app's engine expects everywhere else.
-            url = self.DATABASE_URL
-            if url.startswith("postgres://"):
-                return "postgresql+psycopg://" + url[len("postgres://") :]
-            if url.startswith("postgresql://"):
-                return "postgresql+psycopg://" + url[len("postgresql://") :]
-            return url
+            # postgres:// or postgresql://, sometimes with a driver hint
+            # already baked in (postgresql+asyncpg://) and almost always a
+            # "?sslmode=require" query param. Normalize the driver to
+            # psycopg3 regardless of what was there, and strip sslmode — it's
+            # a psycopg/libpq keyword that asyncpg's connect() doesn't
+            # understand (db/session.py swaps this URL to asyncpg for the
+            # runtime engine), and psycopg's default "prefer" behavior
+            # negotiates SSL correctly anyway once the server requires it.
+            # See `database_requires_ssl` for how the async engine still
+            # gets told to require SSL explicitly.
+            scheme, _, rest = self.DATABASE_URL.partition("://")
+            driver = scheme.split("+")[0]
+            if driver not in ("postgres", "postgresql"):
+                return self.DATABASE_URL
+            split = urlsplit(f"postgresql://{rest}")
+            query = dict(parse_qsl(split.query))
+            query.pop("sslmode", None)
+            return urlunsplit(("postgresql+psycopg", split.netloc, split.path, urlencode(query), ""))
         return (
             f"postgresql+psycopg://{self.DB_USER}:{self.DB_PASSWORD}@"
             f"{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         )
+
+    @property
+    def database_requires_ssl(self) -> bool:
+        """True whenever DATABASE_URL is externally provided — that's always
+        a managed Postgres instance in production, which requires SSL. Local
+        dev's individual DB_* vars never need it."""
+        return bool(self.DATABASE_URL)
 
     @property
     def upload_dir(self) -> Path:
