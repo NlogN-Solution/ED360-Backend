@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.auth import require_role
 from ..api.deps import get_db_session
-from ..core.config import get_settings
+from ..core.storage import delete_upload, save_upload
 from ..core.tenant import scoped_org_id
 from ..models import User
 from ..models.enums import ResourceType
@@ -20,8 +19,6 @@ router = APIRouter(tags=["Resources"])
 # Mirrors frontend/src/constants/permissions.ts's `resources` module exactly.
 VIEW_ROLES = ("admin", "super_admin", "counsellor", "staff")
 MANAGE_ROLES = ("admin", "super_admin")
-
-settings = get_settings()
 
 
 async def get_resource_service(session: AsyncSession = Depends(get_db_session)) -> ResourceService:
@@ -72,19 +69,15 @@ async def upload_resource_file(
 ) -> ResourceRead:
     organization_id = _require_org(user)
 
-    upload_dir = settings.upload_dir
-    extension = Path(file.filename).suffix
-    stored_file_name = f"{uuid4()}{extension}"
-    file_path = upload_dir / stored_file_name
     content = await file.read()
-    file_path.write_bytes(content)
+    file_url = save_upload(content, file.filename, folder="resources")
 
     data = {
         "type": ResourceType.FILE,
         "title": title or file.filename,
         "description": description,
         "category": category,
-        "file_url": f"/uploads/{stored_file_name}",
+        "file_url": file_url,
         "original_file_name": file.filename,
         "mime_type": file.content_type,
         "file_size": len(content),
@@ -126,7 +119,6 @@ async def delete_resource(
     resource = await service.get_resource(resource_id, organization_id=scoped_org_id(user))
     if resource is None:
         raise HTTPException(status_code=404, detail="Resource not found")
-    if resource.type == ResourceType.FILE and resource.file_url:
-        file_path = settings.upload_dir / Path(resource.file_url).name
-        file_path.unlink(missing_ok=True)
+    if resource.type == ResourceType.FILE:
+        delete_upload(resource.file_url)
     await service.delete_resource(resource)

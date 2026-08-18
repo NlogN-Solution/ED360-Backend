@@ -9,13 +9,28 @@ load_dotenv(BASE_DIR / ".env")
 
 
 class Settings:
+    # Individual DB_* vars are for local dev (matches the .env convention
+    # everywhere else in this file). In production (Render), set DATABASE_URL
+    # instead — Render's managed Postgres provides one directly — and it takes
+    # priority; see the `database_url` property below.
     DB_HOST: str = os.getenv("DB_HOST", "localhost")
     DB_PORT: int = int(os.getenv("DB_PORT", "5432"))
     DB_NAME: str = os.getenv("DB_NAME", "ignition")
     DB_USER: str = os.getenv("DB_USER", "postgres")
     DB_PASSWORD: str = os.getenv("DB_PASSWORD", "postgres")
     DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "5"))
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
     UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", str(BASE_DIR / "uploads"))
+
+    # Cloudinary — required in production. Render's filesystem is ephemeral
+    # (wiped on every deploy/restart), so local-disk uploads under UPLOAD_DIR
+    # only work for local dev. When these are unset, app/core/storage.py
+    # transparently falls back to local disk, so leaving them blank locally
+    # is fine and matches every other integration's "unset = feature off"
+    # convention in this file.
+    CLOUDINARY_CLOUD_NAME: str = os.getenv("CLOUDINARY_CLOUD_NAME", "")
+    CLOUDINARY_API_KEY: str = os.getenv("CLOUDINARY_API_KEY", "")
+    CLOUDINARY_API_SECRET: str = os.getenv("CLOUDINARY_API_SECRET", "")
 
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "change-me-super-secret")
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
@@ -70,6 +85,16 @@ class Settings:
 
     @property
     def database_url(self) -> str:
+        if self.DATABASE_URL:
+            # Render (and most managed Postgres providers) hand out
+            # postgres:// or postgresql:// — normalize to the psycopg3 driver
+            # this app's engine expects everywhere else.
+            url = self.DATABASE_URL
+            if url.startswith("postgres://"):
+                return "postgresql+psycopg://" + url[len("postgres://") :]
+            if url.startswith("postgresql://"):
+                return "postgresql+psycopg://" + url[len("postgresql://") :]
+            return url
         return (
             f"postgresql+psycopg://{self.DB_USER}:{self.DB_PASSWORD}@"
             f"{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"

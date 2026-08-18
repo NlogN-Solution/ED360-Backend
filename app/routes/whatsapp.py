@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.auth import get_current_user
 from ..api.deps import get_db_session
-from ..core.config import get_settings
 from ..core.rbac import is_restricted_staff, require_permission
+from ..core.storage import save_upload
 from ..core.tenant import scoped_org_id
 from ..models import User
 from ..models.enums import ActivityType, IntegrationStatus, WhatsAppMessageType
@@ -27,7 +26,6 @@ from ..services.whatsapp_client import WhatsAppAPIError
 from ..services.whatsapp_service import WhatsAppService
 
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp"])
-settings = get_settings()
 
 
 async def get_whatsapp_service(session: AsyncSession = Depends(get_db_session)) -> WhatsAppService:
@@ -188,14 +186,12 @@ async def send_media_message(
     content_type = file.content_type or "application/octet-stream"
     message_type = WhatsAppMessageType.IMAGE if content_type.startswith("image/") else WhatsAppMessageType.DOCUMENT
 
-    upload_dir = settings.upload_dir
-    extension = Path(file.filename or "").suffix
-    stored_file_name = f"{uuid4()}{extension}"
-    file_path = upload_dir / stored_file_name
     content = await file.read()
-    file_path.write_bytes(content)
-    relative_url = f"/uploads/{stored_file_name}"
-    absolute_url = str(request.base_url).rstrip("/") + relative_url
+    file_url = save_upload(content, file.filename or "", folder="whatsapp")
+    # Meta needs a URL it can actually fetch the media from — Cloudinary
+    # URLs already are one; the local-disk fallback isn't (dev-only
+    # limitation, same as before this used Cloudinary at all).
+    absolute_url = file_url if file_url.startswith("http") else str(request.base_url).rstrip("/") + file_url
 
     try:
         message = await whatsapp_service.send_media(
@@ -203,7 +199,7 @@ async def send_media_message(
             account,
             user,
             message_type,
-            relative_url,
+            file_url,
             absolute_url,
             content_type,
             caption=caption,

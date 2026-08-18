@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..api.deps import get_db_session
 from ..core.config import get_settings
 from ..core.encryption import decrypt_credential
+from ..core.storage import save_upload
 from ..models import WhatsAppAccount, WhatsAppEventLog, WhatsAppMessage
 from ..models.enums import WhatsAppMessageStatus, WhatsAppMessageType
 from ..services.whatsapp_client import WhatsAppAPIError, download_media, get_media_url
@@ -199,9 +200,6 @@ async def _download_inbound_media(account: WhatsAppAccount, media_id: str, meta_
     exists in this codebase (see plan's stated v1 scaling limitation).
     Failure here must not fail the whole webhook: the message is still
     recorded, just without a local media copy."""
-    from pathlib import Path
-    from uuid import uuid4
-
     try:
         access_token = decrypt_credential(account.access_token_encrypted)
         media_info = await get_media_url(media_id, access_token)
@@ -210,10 +208,7 @@ async def _download_inbound_media(account: WhatsAppAccount, media_id: str, meta_
             return None
         content = await download_media(remote_url, access_token)
         extension = {"image": ".jpg", "document": ".pdf", "video": ".mp4", "audio": ".ogg"}.get(meta_type, "")
-        stored_file_name = f"{uuid4()}{extension}"
-        file_path = get_settings().upload_dir / stored_file_name
-        file_path.write_bytes(content)
-        return f"/uploads/{stored_file_name}"
+        return save_upload(content, f"inbound{extension}", folder="whatsapp")
     except WhatsAppAPIError:
         logger.exception("Failed to download inbound WhatsApp media %s", media_id)
         return None

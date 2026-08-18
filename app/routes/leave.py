@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
-from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..api.auth import require_role
 from ..api.deps import get_db_session
 from ..api.exceptions import ForbiddenException
-from ..core.config import get_settings
+from ..core.storage import save_upload
 from ..core.tenant import scoped_org_id
 from ..models import User
 from ..models.enums import LeaveStatus
@@ -28,8 +27,6 @@ from ..schemas.leave import (
 from ..services.leave_service import LeaveService
 
 router = APIRouter(tags=["Leave"])
-
-settings = get_settings()
 
 STAFF_ROLES = (
     "admin",
@@ -130,11 +127,8 @@ async def create_leave_request(
     attachment_url = None
     attachment_name = None
     if file is not None:
-        extension = Path(file.filename).suffix
-        stored_file_name = f"{uuid4()}{extension}"
         content = await file.read()
-        (settings.upload_dir / stored_file_name).write_bytes(content)
-        attachment_url = f"/uploads/{stored_file_name}"
+        attachment_url = save_upload(content, file.filename, folder="leave-attachments")
         attachment_name = file.filename
 
     return await service.create_request(

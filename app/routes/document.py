@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.auth import get_current_user, require_role
 from ..api.deps import get_db_session
-from ..core.config import get_settings
+from ..core.storage import save_upload
 from ..core.tenant import scoped_org_id
 from ..models import User
 from ..models.enums import DocumentType, NotificationTemplateKey, NotificationType
@@ -30,8 +30,6 @@ from ..services.notification_template_service import NotificationTemplateService
 from ..services.workflow_service import ChecklistService
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
-
-settings = get_settings()
 
 
 async def get_document_service(session: AsyncSession = Depends(get_db_session)) -> DocumentService:
@@ -163,12 +161,8 @@ async def upload_document(
     if user.role == "student":
         student_id = user.id
 
-    upload_dir = settings.upload_dir
-    extension = Path(file.filename).suffix
-    stored_file_name = f"{uuid4()}{extension}"
-    file_path = upload_dir / stored_file_name
     content = await file.read()
-    file_path.write_bytes(content)
+    file_url = save_upload(content, file.filename, folder="documents")
 
     document_data = {
         "student_id": student_id,
@@ -176,8 +170,8 @@ async def upload_document(
         "document_type": document_type,
         "title": title or file.filename,
         "original_file_name": file.filename,
-        "stored_file_name": stored_file_name,
-        "file_url": f"/uploads/{stored_file_name}",
+        "stored_file_name": Path(file_url).name,
+        "file_url": file_url,
         "mime_type": file.content_type,
         "file_size": len(content),
         "remarks": remarks,

@@ -8,16 +8,16 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import parseaddr
 from email import encoders
-from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
+import httpx
 from sqlalchemy import or_, select
 from sqlalchemy import func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from ..core.config import get_settings
 from ..core.encryption import decrypt_credential, encrypt_credential
+from ..core.storage import read_upload, save_upload
 from ..models import (
     EmailAccount,
     EmailAttachment,
@@ -453,11 +453,7 @@ class GmailService:
         return message, thread
 
     async def _save_attachments(self, message: EmailMessage, attachment_files: list[tuple[str, bytes, str]]) -> None:
-        upload_dir = get_settings().upload_dir
         for filename, content, mime_type in attachment_files:
-            extension = Path(filename).suffix
-            stored_file_name = f"{uuid4()}{extension}"
-            (upload_dir / stored_file_name).write_bytes(content)
             self.session.add(
                 EmailAttachment(
                     organization_id=message.organization_id,
@@ -465,7 +461,7 @@ class GmailService:
                     filename=filename,
                     mime_type=mime_type,
                     size_bytes=len(content),
-                    local_url=f"/uploads/{stored_file_name}",
+                    local_url=save_upload(content, filename, folder="email-attachments"),
                 )
             )
         await self.session.commit()
@@ -476,14 +472,15 @@ class GmailService:
         attachment_result = await self.session.execute(
             select(EmailAttachment).where(EmailAttachment.message_id == message.id)
         )
-        upload_dir = get_settings().upload_dir
         attachment_files: list[tuple[str, bytes, str]] = []
         for attachment in attachment_result.scalars().all():
             if not attachment.local_url:
                 continue
-            file_path = upload_dir / Path(attachment.local_url).name
-            if file_path.exists():
-                attachment_files.append((attachment.filename, file_path.read_bytes(), attachment.mime_type))
+            try:
+                content = await read_upload(attachment.local_url)
+            except (OSError, httpx.HTTPError):
+                continue
+            attachment_files.append((attachment.filename, content, attachment.mime_type))
 
         subject = thread.subject or "(no subject)"
         try:
@@ -672,11 +669,7 @@ class GmailService:
         except GmailAPIError:
             logger.exception("Failed to download Gmail attachment %s", part.get("filename"))
             return None
-        extension = Path(part["filename"]).suffix
-        stored_file_name = f"{uuid4()}{extension}"
-        file_path = get_settings().upload_dir / stored_file_name
-        file_path.write_bytes(content)
-        return f"/uploads/{stored_file_name}"
+        return save_upload(content, part["filename"], folder="email-attachments")
 
     # --- notifications -----------------------------------------------
 

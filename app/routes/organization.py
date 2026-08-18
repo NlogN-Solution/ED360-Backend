@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
-from uuid import uuid4
-
 from fastapi import APIRouter, Depends, File, UploadFile
 
 from ..api.auth import get_current_user, require_role
 from ..api.exceptions import BadRequestException, NotFoundException
-from ..core.config import get_settings
+from ..core.storage import save_upload
 from ..models import Organization, User
 from ..models.billing import BillingEventStatus, BillingEventType
 from ..schemas.organization import OrganizationRead, OrganizationUpdate
@@ -23,8 +20,6 @@ from ..services.organization_service import OrganizationService, get_organizatio
 from ..services.subscription_service import PLAN_DEFAULTS, PRICE_PER_EXTRA_SEAT, SubscriptionService, get_subscription_service
 
 router = APIRouter(prefix="/organizations", tags=["Organizations"])
-
-settings = get_settings()
 
 
 async def _get_current_org(
@@ -92,14 +87,10 @@ async def upload_my_organization_logo(
     organization_service: OrganizationService = Depends(get_organization_service),
 ) -> OrganizationRead:
     organization = await _get_current_org(current_user, organization_service)
-    upload_dir = settings.upload_dir
-    extension = Path(file.filename).suffix
-    stored_file_name = f"{uuid4()}{extension}"
-    file_path = upload_dir / stored_file_name
     content = await file.read()
-    file_path.write_bytes(content)
+    file_url = save_upload(content, file.filename, folder="branding")
 
-    organization = await organization_service.set_logo(organization, f"/uploads/{stored_file_name}")
+    organization = await organization_service.set_logo(organization, file_url)
     return OrganizationRead.model_validate(organization)
 
 
@@ -110,14 +101,10 @@ async def upload_my_organization_favicon(
     organization_service: OrganizationService = Depends(get_organization_service),
 ) -> OrganizationRead:
     organization = await _get_current_org(current_user, organization_service)
-    upload_dir = settings.upload_dir
-    extension = Path(file.filename).suffix
-    stored_file_name = f"{uuid4()}{extension}"
-    file_path = upload_dir / stored_file_name
     content = await file.read()
-    file_path.write_bytes(content)
+    file_url = save_upload(content, file.filename, folder="branding")
 
-    organization = await organization_service.set_favicon(organization, f"/uploads/{stored_file_name}")
+    organization = await organization_service.set_favicon(organization, file_url)
     return OrganizationRead.model_validate(organization)
 
 

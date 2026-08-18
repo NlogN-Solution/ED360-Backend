@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..api.auth import get_current_user, require_role
 from ..api.deps import get_db_session
 from ..api.exceptions import ForbiddenException
-from ..core.config import get_settings
 from ..core.rbac import can_manage_target
+from ..core.storage import save_upload
 from ..core.tenant import scoped_org_id
 from ..models import User
 from ..models.enums import ActivityType
@@ -28,8 +27,6 @@ from ..schemas.user import (
 from ..services.activity_log_service import ActivityLogService, get_activity_log_service
 from ..services.subscription_service import SubscriptionService, get_subscription_service
 from ..services.user_service import UserService
-
-settings = get_settings()
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -100,14 +97,10 @@ async def upload_my_avatar(
     user_service: UserService = Depends(get_user_service),
     current_user: User = Depends(get_current_user),
 ) -> UserRead:
-    upload_dir = settings.upload_dir
-    extension = Path(file.filename).suffix
-    stored_file_name = f"{uuid4()}{extension}"
-    file_path = upload_dir / stored_file_name
     content = await file.read()
-    file_path.write_bytes(content)
+    file_url = save_upload(content, file.filename, folder="avatars")
 
-    user = await user_service.update_user(current_user, {"avatar_url": f"/uploads/{stored_file_name}"})
+    user = await user_service.update_user(current_user, {"avatar_url": file_url})
     return UserRead.model_validate(user)
 
 
@@ -415,12 +408,8 @@ async def upload_user_avatar(
     if current_user.role == "counsellor" and user.role != "student":
         raise ForbiddenException("You do not have permission to modify this user")
 
-    upload_dir = settings.upload_dir
-    extension = Path(file.filename).suffix
-    stored_file_name = f"{uuid4()}{extension}"
-    file_path = upload_dir / stored_file_name
     content = await file.read()
-    file_path.write_bytes(content)
+    file_url = save_upload(content, file.filename, folder="avatars")
 
-    user = await user_service.update_user(user, {"avatar_url": f"/uploads/{stored_file_name}"})
+    user = await user_service.update_user(user, {"avatar_url": file_url})
     return UserRead.model_validate(user)
