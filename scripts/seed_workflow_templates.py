@@ -10,6 +10,7 @@ missing rather than duplicating rows.
 from __future__ import annotations
 
 import asyncio
+import uuid
 from dataclasses import dataclass, field
 
 from sqlalchemy import select
@@ -17,6 +18,11 @@ from sqlalchemy import select
 from app.db.session import session_factory
 from app.models import Country, WorkflowStage, WorkflowStageDocumentRequirement, WorkflowTemplate
 from app.models.enums import DocumentType
+
+# Same fixed id migration e009a611841b used to backfill pre-multi-tenancy data —
+# workflow_templates.organization_id is NOT NULL, so these system-seeded templates
+# (shared across all tenants) live under the "Default Organization" it created.
+DEFAULT_ORGANIZATION_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 @dataclass
@@ -188,7 +194,14 @@ async def upsert_template(session, *, name: str, slug: str, description: str, co
         print(f"skip (exists): {slug}")
         return
 
-    template = WorkflowTemplate(name=name, slug=slug, description=description, country_id=country_id, is_default=is_default)
+    template = WorkflowTemplate(
+        name=name,
+        slug=slug,
+        description=description,
+        country_id=country_id,
+        is_default=is_default,
+        organization_id=DEFAULT_ORGANIZATION_ID,
+    )
     session.add(template)
     await session.flush()
 
