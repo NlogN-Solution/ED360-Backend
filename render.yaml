@@ -5,10 +5,10 @@ services:
     rootDir: backend
     plan: free
     buildCommand: "pip install -r requirements.txt"
-    # alembic upgrade head is idempotent (no-ops once already at head), so
-    # running it on every boot — not just the first deploy — is safe and
-    # means a new migration ships automatically with the next deploy.
-    startCommand: "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    # alembic upgrade head and the workflow/country seed are both idempotent
+    # (no-ops once already applied/seeded), so running them on every boot —
+    # not just the first deploy — is safe and keeps prod self-sufficient.
+    startCommand: "alembic upgrade head && python -m scripts.seed_workflow_templates && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
     healthCheckPath: /health
     envVars:
       # Managed Postgres connection string (Render Postgres or external) —
