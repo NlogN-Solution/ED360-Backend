@@ -13,6 +13,7 @@ class EmployeeProfileUpsert(BaseModel):
     department: str | None = None
     department_id: UUID | None = None
     designation: str | None = None
+    job_role_id: UUID | None = None
     joining_date: date | None = None
     employment_status: str | None = None
     employment_type: EmploymentType | None = None
@@ -31,6 +32,8 @@ class EmployeeProfileRead(BaseModel):
     department: str | None
     department_id: UUID | None
     designation: str | None
+    job_role_id: UUID | None = None
+    job_role_name: str | None = None
     joining_date: date | None
     employment_status: str | None
     employment_type: EmploymentType | None

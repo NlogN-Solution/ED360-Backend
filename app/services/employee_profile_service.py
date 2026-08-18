@@ -25,7 +25,9 @@ class EmployeeProfileService:
 
     async def get_by_user_id(self, user_id: UUID, organization_id: UUID | None = None) -> EmployeeProfile | None:
         query = select(EmployeeProfile).options(
-            selectinload(EmployeeProfile.department_ref), selectinload(EmployeeProfile.office)
+            selectinload(EmployeeProfile.department_ref),
+            selectinload(EmployeeProfile.office),
+            selectinload(EmployeeProfile.job_role),
         ).where(
             EmployeeProfile.user_id == user_id
         )

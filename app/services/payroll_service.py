@@ -18,9 +18,18 @@ from ..models import (
     PayrollRun,
     Payslip,
     PayslipLineItem,
+    RecurringLineItem,
     SalaryStructure,
+    User,
 )
-from ..models.enums import AttendanceStatus, EmploymentEventType, LeaveStatus, PayrollRunStatus, PayslipLineType
+from ..models.enums import (
+    AttendanceStatus,
+    EmploymentEventType,
+    LeaveStatus,
+    PayrollRunStatus,
+    PayslipLineItemCategory,
+    PayslipLineType,
+)
 from .attendance_service import DEFAULT_WORK_DAYS, AttendanceService, work_day_dates
 
 
@@ -79,7 +88,90 @@ class PayrollService:
         await self.session.refresh(structure)
         return structure
 
+    # --- Recurring line items ---------------------------------------------------
+
+    async def list_recurring_items(self, organization_id: UUID, user_id: UUID) -> list[RecurringLineItem]:
+        result = await self.session.execute(
+            select(RecurringLineItem)
+            .where(RecurringLineItem.organization_id == organization_id, RecurringLineItem.user_id == user_id)
+            .order_by(RecurringLineItem.created_at)
+        )
+        return list(result.scalars().all())
+
+    async def get_recurring_item(self, item_id: UUID, organization_id: UUID | None = None) -> RecurringLineItem | None:
+        query = select(RecurringLineItem).where(RecurringLineItem.id == item_id)
+        if organization_id is not None:
+            query = query.where(RecurringLineItem.organization_id == organization_id)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def create_recurring_item(
+        self,
+        organization_id: UUID,
+        user_id: UUID,
+        type_: PayslipLineType,
+        category: PayslipLineItemCategory,
+        label: str,
+        amount: float,
+    ) -> RecurringLineItem:
+        item = RecurringLineItem(
+            organization_id=organization_id,
+            user_id=user_id,
+            type=type_,
+            category=category,
+            label=label,
+            amount=amount,
+        )
+        self.session.add(item)
+        await self.session.commit()
+        await self.session.refresh(item)
+        return item
+
+    async def update_recurring_item(self, item: RecurringLineItem, data: dict[str, Any]) -> RecurringLineItem:
+        for key, value in data.items():
+            if value is not None:
+                setattr(item, key, value)
+        await self.session.commit()
+        await self.session.refresh(item)
+        return item
+
+    async def deactivate_recurring_item(self, item: RecurringLineItem) -> RecurringLineItem:
+        item.is_active = False
+        await self.session.commit()
+        await self.session.refresh(item)
+        return item
+
+    async def _list_active_recurring_items(self, user_id: UUID, organization_id: UUID) -> list[RecurringLineItem]:
+        result = await self.session.execute(
+            select(RecurringLineItem).where(
+                RecurringLineItem.user_id == user_id,
+                RecurringLineItem.organization_id == organization_id,
+                RecurringLineItem.is_active.is_(True),
+            )
+        )
+        return list(result.scalars().all())
+
     # --- Payroll runs ----------------------------------------------------------
+
+    async def list_employees_missing_salary(self, organization_id: UUID) -> list[dict[str, Any]]:
+        """Employees with an EmployeeProfile but no SalaryStructure — these are
+        silently excluded from a generated payroll run. Used both to warn an
+        admin before generating and to report who was skipped afterwards."""
+        result = await self.session.execute(
+            select(User.id, User.first_name, User.last_name)
+            .join(EmployeeProfile, EmployeeProfile.user_id == User.id)
+            .where(EmployeeProfile.organization_id == organization_id)
+            .where(
+                ~EmployeeProfile.user_id.in_(
+                    select(SalaryStructure.user_id).where(SalaryStructure.organization_id == organization_id)
+                )
+            )
+            .order_by(User.first_name, User.last_name)
+        )
+        return [
+            {"id": user_id, "name": f"{first_name} {last_name}".strip()}
+            for user_id, first_name, last_name in result.all()
+        ]
 
     async def get_run(self, run_id: UUID, organization_id: UUID | None = None) -> PayrollRun | None:
         query = select(PayrollRun).where(PayrollRun.id == run_id)
@@ -114,11 +206,13 @@ class PayrollService:
 
     async def create_run(
         self, organization_id: UUID, year: int, month: int, generated_by: UUID
-    ) -> tuple[PayrollRun, int]:
+    ) -> tuple[PayrollRun, list[dict[str, Any]]]:
         """Generates one Payslip per employee who has a SalaryStructure, computing
-        paid/unpaid days from real Attendance + Leave data for the period. Returns
-        (run, skipped_count) — employees with a profile but no salary structure are
-        left out and counted, not silently guessed at."""
+        paid/unpaid days from real Attendance + Leave data for the period, and
+        copying in any of that employee's active RecurringLineItems (tax, PF,
+        bonus, allowance, ...). Returns (run, skipped) — employees with a
+        profile but no salary structure are left out and named, not silently
+        guessed at."""
         period_start = date(year, month, 1)
         period_end = date(year, month, calendar.monthrange(year, month)[1])
 
@@ -146,15 +240,7 @@ class PayrollService:
             .scalars()
             .all()
         )
-        profile_count = (
-            await self.session.scalar(
-                select(func.count())
-                .select_from(EmployeeProfile)
-                .where(EmployeeProfile.organization_id == organization_id)
-            )
-            or 0
-        )
-        skipped = max(0, profile_count - len(structures))
+        skipped = await self.list_employees_missing_salary(organization_id)
 
         for structure in structures:
             present_days = await self._count_present_days(structure.user_id, organization_id, period_start, period_end)
@@ -169,23 +255,40 @@ class PayrollService:
             )
             net_pay = round(basic_salary - attendance_deduction, 2)
 
-            self.session.add(
-                Payslip(
-                    organization_id=organization_id,
-                    payroll_run_id=run.id,
-                    user_id=structure.user_id,
-                    basic_salary=structure.basic_salary,
-                    currency=structure.currency,
-                    expected_work_days=expected_work_days,
-                    present_days=present_days,
-                    paid_leave_days=paid_leave_days,
-                    unpaid_days=unpaid_days,
-                    attendance_deduction=attendance_deduction,
-                    additions_total=0,
-                    deductions_total=0,
-                    net_pay=net_pay,
-                )
+            payslip = Payslip(
+                organization_id=organization_id,
+                payroll_run_id=run.id,
+                user_id=structure.user_id,
+                basic_salary=structure.basic_salary,
+                currency=structure.currency,
+                expected_work_days=expected_work_days,
+                present_days=present_days,
+                paid_leave_days=paid_leave_days,
+                unpaid_days=unpaid_days,
+                attendance_deduction=attendance_deduction,
+                additions_total=0,
+                deductions_total=0,
+                net_pay=net_pay,
             )
+            self.session.add(payslip)
+            await self.session.flush()
+
+            recurring_items = await self._list_active_recurring_items(structure.user_id, organization_id)
+            for recurring in recurring_items:
+                self.session.add(
+                    PayslipLineItem(
+                        organization_id=organization_id,
+                        payslip_id=payslip.id,
+                        type=recurring.type,
+                        category=recurring.category,
+                        label=recurring.label,
+                        amount=recurring.amount,
+                        created_by=generated_by,
+                    )
+                )
+            if recurring_items:
+                await self.session.flush()
+                await self._recompute_totals(payslip)
 
         await self.session.commit()
         await self.session.refresh(run)
@@ -291,12 +394,19 @@ class PayrollService:
     # --- Line items ----------------------------------------------------------------
 
     async def add_line_item(
-        self, payslip: Payslip, type_: PayslipLineType, label: str, amount: float, created_by: UUID
+        self,
+        payslip: Payslip,
+        type_: PayslipLineType,
+        label: str,
+        amount: float,
+        created_by: UUID,
+        category: PayslipLineItemCategory = PayslipLineItemCategory.OTHER,
     ) -> PayslipLineItem:
         item = PayslipLineItem(
             organization_id=payslip.organization_id,
             payslip_id=payslip.id,
             type=type_,
+            category=category,
             label=label,
             amount=amount,
             created_by=created_by,

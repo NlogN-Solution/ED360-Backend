@@ -164,7 +164,22 @@ DEFAULT_MODULE_ROLES: dict[str, tuple[str, ...]] = {
         UserRole.SUPPORT.value,
         UserRole.ADMISSIONS.value,
     ),
-    "responsibilities": (UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value),
+    # Duties & Responsibilities (role responsibilities / policies / SOPs /
+    # code of conduct) — real read/write split enforcement, see
+    # RESPONSIBILITY_MODULE_DEFAULTS and routes/duty.py below. This tuple is
+    # the union, used as the read-side default and for nav-gating.
+    "responsibilities": (
+        UserRole.ADMIN.value,
+        UserRole.SUPER_ADMIN.value,
+        UserRole.MANAGER.value,
+        UserRole.COUNSELLOR.value,
+        UserRole.STAFF.value,
+        UserRole.FRONTDESK.value,
+        UserRole.FINANCE.value,
+        UserRole.MARKETING.value,
+        UserRole.SUPPORT.value,
+        UserRole.ADMISSIONS.value,
+    ),
     "contacts": (UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value, UserRole.COUNSELLOR.value),
     "communication": (UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value, UserRole.COUNSELLOR.value),
     # Separate from `communication` (Internal chat) because Managers need
@@ -177,7 +192,18 @@ DEFAULT_MODULE_ROLES: dict[str, tuple[str, ...]] = {
     "email": (UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value, UserRole.MANAGER.value, UserRole.COUNSELLOR.value),
     "marketing": (UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value, UserRole.MARKETING.value),
     "automation": (UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value),
-    "reports": (UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value),
+    # Broadened per report category — see routes/report.py's REPORT_DATASETS
+    # role lists (leads/marketing get lead reports, counsellors get
+    # applications, managers/finance get workforce reports); this entry is
+    # the union, used only for nav-gating, not per-dataset enforcement.
+    "reports": (
+        UserRole.ADMIN.value,
+        UserRole.SUPER_ADMIN.value,
+        UserRole.MANAGER.value,
+        UserRole.COUNSELLOR.value,
+        UserRole.MARKETING.value,
+        UserRole.FINANCE.value,
+    ),
     "auditLogs": (UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value),
     "resources": (UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value, UserRole.COUNSELLOR.value, UserRole.STAFF.value),
     "aiAssistant": (UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value, UserRole.COUNSELLOR.value),
@@ -205,6 +231,15 @@ LEAD_MODULE_DEFAULTS: dict[Literal["read", "write"], tuple[str, ...]] = {
         UserRole.FRONTDESK.value,
     ),
     "write": (UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value, UserRole.COUNSELLOR.value),
+}
+
+# Duties & Responsibilities' real read/write split — everyone in "read" can
+# see duties applicable to them and acknowledge; only "write" can create,
+# edit, publish, archive, assign, or manage versions. Orgs can still
+# override per-role via the Roles & Permissions matrix (get_effective_permission).
+RESPONSIBILITY_MODULE_DEFAULTS: dict[Literal["read", "write"], tuple[str, ...]] = {
+    "read": DEFAULT_MODULE_ROLES["responsibilities"],
+    "write": (UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value, UserRole.MANAGER.value),
 }
 
 # Every module the Roles & Permissions matrix displays, in the same order as
@@ -263,6 +298,8 @@ PERMISSION_ROLES: tuple[str, ...] = (
 def default_permission(role: str, module: str) -> tuple[bool, bool]:
     if module == "leads":
         return role in LEAD_MODULE_DEFAULTS["read"], role in LEAD_MODULE_DEFAULTS["write"]
+    if module == "responsibilities":
+        return role in RESPONSIBILITY_MODULE_DEFAULTS["read"], role in RESPONSIBILITY_MODULE_DEFAULTS["write"]
     allowed = role in DEFAULT_MODULE_ROLES.get(module, ())
     return allowed, allowed
 

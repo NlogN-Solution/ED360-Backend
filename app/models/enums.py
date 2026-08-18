@@ -238,6 +238,7 @@ class NotificationType(str, Enum):
     APPLICANT = "applicant"
     WHATSAPP = "whatsapp"
     EMAIL = "email"
+    DUTY = "duty"
 
 
 class NotificationChannel(str, Enum):
@@ -383,6 +384,7 @@ class ActivityType(str, Enum):
     STATUS_CHANGE = "status_change"
     PAYMENT = "payment"
     IMPERSONATE = "impersonate"
+    ACKNOWLEDGE = "acknowledge"
     OTHER = "other"
 
 
@@ -548,6 +550,42 @@ class PayrollRunStatus(str, Enum):
 class PayslipLineType(str, Enum):
     ADDITION = "addition"
     DEDUCTION = "deduction"
+
+
+class PayslipLineItemCategory(str, Enum):
+    TAX = "tax"
+    PROVIDENT_FUND = "provident_fund"
+    BONUS = "bonus"
+    ALLOWANCE = "allowance"
+    OTHER = "other"
+
+
+class DutyType(str, Enum):
+    ROLE_RESPONSIBILITY = "role_responsibility"
+    CODE_OF_CONDUCT = "code_of_conduct"
+    POLICY = "policy"
+    GUIDELINE = "guideline"
+    SOP = "sop"
+    COMPLIANCE = "compliance"
+    KPI_EXPECTATION = "kpi_expectation"
+    GENERAL = "general"
+
+
+class DutyPriority(str, Enum):
+    NORMAL = "normal"
+    IMPORTANT = "important"
+    CRITICAL = "critical"
+
+
+class DutyStatus(str, Enum):
+    DRAFT = "draft"
+    PUBLISHED = "published"
+    ARCHIVED = "archived"
+
+
+class ResourceType(str, Enum):
+    FILE = "file"
+    ARTICLE = "article"
 
 
 class ContactType(str, Enum):

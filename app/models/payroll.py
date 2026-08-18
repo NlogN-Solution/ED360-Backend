@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy import TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -11,7 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from ..db.base import Base
 from ..db.mixins import TenantMixin, TimestampMixin, UUIDPKMixin
 from ..db.types import enum_type
-from .enums import PayrollRunStatus, PayslipLineType
+from .enums import PayrollRunStatus, PayslipLineItemCategory, PayslipLineType
 
 
 class SalaryStructure(Base, UUIDPKMixin, TimestampMixin, TenantMixin):
@@ -132,6 +132,11 @@ class PayslipLineItem(Base, UUIDPKMixin, TenantMixin):
         enum_type(PayslipLineType, "payslip_line_type", create_type=False),
         nullable=False,
     )
+    category: Mapped[PayslipLineItemCategory] = mapped_column(
+        enum_type(PayslipLineItemCategory, "payslip_line_item_category", create_type=False),
+        nullable=False,
+        server_default=PayslipLineItemCategory.OTHER.value,
+    )
     label: Mapped[str] = mapped_column(String(150), nullable=False)
     amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
@@ -143,3 +148,40 @@ class PayslipLineItem(Base, UUIDPKMixin, TenantMixin):
 
     def __repr__(self) -> str:
         return f"<PayslipLineItem id={self.id} type={self.type} amount={self.amount}>"
+
+
+class RecurringLineItem(Base, UUIDPKMixin, TimestampMixin, TenantMixin):
+    """A per-employee template (e.g. "Provident Fund", "Transport Allowance")
+    applied automatically to every payslip generated for that employee going
+    forward, so admins don't have to re-enter the same addition/deduction on
+    every payroll run. Flat amount only — not percentage-of-basic."""
+
+    __tablename__ = "recurring_line_items"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    type: Mapped[PayslipLineType] = mapped_column(
+        enum_type(PayslipLineType, "payslip_line_type", create_type=False),
+        nullable=False,
+    )
+    category: Mapped[PayslipLineItemCategory] = mapped_column(
+        enum_type(PayslipLineItemCategory, "payslip_line_item_category", create_type=False),
+        nullable=False,
+        server_default=PayslipLineItemCategory.OTHER.value,
+    )
+    label: Mapped[str] = mapped_column(String(150), nullable=False)
+    amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+
+    user: Mapped["User"] = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index("idx_recurring_line_items_organization_id", "organization_id"),
+        Index("idx_recurring_line_items_user_id", "user_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<RecurringLineItem id={self.id} user_id={self.user_id} type={self.type} label={self.label!r}>"

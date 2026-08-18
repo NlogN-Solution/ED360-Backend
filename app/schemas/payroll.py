@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from ..models.enums import PayrollRunStatus, PayslipLineType
+from ..models.enums import PayrollRunStatus, PayslipLineItemCategory, PayslipLineType
 
 
 class SalaryStructureUpsert(BaseModel):
@@ -55,8 +55,13 @@ class PayrollRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class SkippedEmployee(BaseModel):
+    id: UUID
+    name: str
+
+
 class PayrollRunGenerateResult(PayrollRunRead):
-    skipped_employees: int
+    skipped_employees: list[SkippedEmployee]
 
 
 class PayrollRunList(BaseModel):
@@ -68,6 +73,7 @@ class PayrollRunList(BaseModel):
 
 class PayslipLineItemCreate(BaseModel):
     type: PayslipLineType
+    category: PayslipLineItemCategory = PayslipLineItemCategory.OTHER
     label: str
     amount: float
 
@@ -76,10 +82,40 @@ class PayslipLineItemRead(BaseModel):
     id: UUID
     payslip_id: UUID
     type: PayslipLineType
+    category: PayslipLineItemCategory
     label: str
     amount: float
     created_by: UUID | None
     created_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RecurringLineItemCreate(BaseModel):
+    type: PayslipLineType
+    category: PayslipLineItemCategory = PayslipLineItemCategory.OTHER
+    label: str
+    amount: float
+
+
+class RecurringLineItemUpdate(BaseModel):
+    category: PayslipLineItemCategory | None = None
+    label: str | None = None
+    amount: float | None = None
+    is_active: bool | None = None
+
+
+class RecurringLineItemRead(BaseModel):
+    id: UUID
+    organization_id: UUID | None = None
+    user_id: UUID
+    type: PayslipLineType
+    category: PayslipLineItemCategory
+    label: str
+    amount: float
+    is_active: bool
+    created_at: datetime | None
+    updated_at: datetime | None
 
     model_config = ConfigDict(from_attributes=True)
 

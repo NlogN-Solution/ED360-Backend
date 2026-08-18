@@ -297,6 +297,14 @@ class EmployeeProfile(Base, UUIDPKMixin, TimestampMixin, TenantMixin):
         ForeignKey("departments.id", ondelete="SET NULL"),
     )
     designation: Mapped[str | None] = mapped_column(String(100))
+    # The structured counterpart to the free-text `designation` above — used
+    # by the Duties module to resolve "everyone with this job role sees this
+    # duty". Separate on purpose: designation is a display label with no
+    # structure, job_role_id is a real FK an admin opts into per employee.
+    job_role_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("job_roles.id", ondelete="SET NULL"),
+    )
     joining_date: Mapped[date | None] = mapped_column(Date)
     employment_status: Mapped[str | None] = mapped_column(String(30), server_default="active")
     employment_type: Mapped[EmploymentType | None] = mapped_column(
@@ -338,6 +346,11 @@ class EmployeeProfile(Base, UUIDPKMixin, TimestampMixin, TenantMixin):
         foreign_keys=[office_id],
         back_populates="employee_profiles",
     )
+    job_role: Mapped["JobRole | None"] = relationship(
+        "JobRole",
+        foreign_keys=[job_role_id],
+        back_populates="employee_profiles",
+    )
     employment_events: Mapped[list["EmployeeEmploymentEvent"]] = relationship(
         back_populates="employee_profile",
         cascade="all, delete-orphan",
@@ -355,6 +368,12 @@ class EmployeeProfile(Base, UUIDPKMixin, TimestampMixin, TenantMixin):
         """Requires office to already be eager-loaded, same rule as
         department_name above."""
         return self.office.name if self.office is not None else self.office_location
+
+    @property
+    def job_role_name(self) -> str | None:
+        """Requires job_role to already be eager-loaded, same rule as
+        department_name above."""
+        return self.job_role.name if self.job_role is not None else None
 
     __table_args__ = (
         Index("idx_employee_profiles_user_id", "user_id"),

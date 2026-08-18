@@ -19,9 +19,7 @@ class Comment(Base, UUIDPKMixin, TimestampMixin, TenantMixin):
         enum_type(CommentEntityType, "comment_entity_type", create_type=False),
         nullable=False,
     )
-    # No FK constraint — which table `entity_id` points at depends on `entity_type`
-    # (leads, users, or applications), so it can't reference one fixed table. Same
-    # polymorphic-pointer convention as Notification.related_id.
+    
     entity_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     author_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),

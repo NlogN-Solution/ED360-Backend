@@ -20,8 +20,12 @@ from ..schemas.payroll import (
     PayslipLineItemRead,
     PayslipList,
     PayslipRead,
+    RecurringLineItemCreate,
+    RecurringLineItemRead,
+    RecurringLineItemUpdate,
     SalaryStructureRead,
     SalaryStructureUpsert,
+    SkippedEmployee,
 )
 from ..services.payroll_service import PayrollService
 
@@ -99,6 +103,18 @@ async def list_payroll_runs(
 ) -> PayrollRunList:
     runs, total = await service.list_runs(scoped_org_id(user), page, limit)
     return PayrollRunList(items=runs, total=total, page=page, limit=limit)
+
+
+@router.get(
+    "/payroll-runs/missing-salary",
+    response_model=list[SkippedEmployee],
+    summary="Employees who would be skipped if a run were generated now",
+)
+async def list_employees_missing_salary(
+    service: PayrollService = Depends(get_payroll_service),
+    user: User = Depends(require_role(*VIEW_ROLES)),
+) -> list[SkippedEmployee]:
+    return await service.list_employees_missing_salary(scoped_org_id(user))
 
 
 @router.post("/payroll-runs", response_model=PayrollRunGenerateResult, summary="Generate a payroll run for a period")
@@ -197,7 +213,7 @@ async def add_payslip_line_item(
         raise HTTPException(status_code=404, detail="Payslip not found")
     if payslip.run_status != PayrollRunStatus.DRAFT:
         raise HTTPException(status_code=409, detail="Line items can only be added while the run is a draft")
-    await service.add_line_item(payslip, payload.type, payload.label, payload.amount, user.id)
+    await service.add_line_item(payslip, payload.type, payload.label, payload.amount, user.id, category=payload.category)
     refreshed = await service.get_payslip(payslip_id, organization_id=scoped_org_id(user))
     assert refreshed is not None
     return refreshed
@@ -222,6 +238,69 @@ async def remove_payslip_line_item(
     refreshed = await service.get_payslip(payslip_id, organization_id=scoped_org_id(user))
     assert refreshed is not None
     return refreshed
+
+
+@router.get(
+    "/recurring-line-items/{user_id}",
+    response_model=list[RecurringLineItemRead],
+    summary="An employee's recurring payslip line items (tax, PF, bonus, allowance, ...)",
+)
+async def list_recurring_line_items(
+    user_id: UUID,
+    service: PayrollService = Depends(get_payroll_service),
+    user: User = Depends(require_role(*VIEW_ROLES)),
+) -> list[RecurringLineItemRead]:
+    return await service.list_recurring_items(scoped_org_id(user), user_id)
+
+
+@router.post(
+    "/recurring-line-items/{user_id}",
+    response_model=RecurringLineItemRead,
+    summary="Add a recurring line item for an employee",
+)
+async def create_recurring_line_item(
+    user_id: UUID,
+    payload: RecurringLineItemCreate,
+    service: PayrollService = Depends(get_payroll_service),
+    user: User = Depends(require_role(*MANAGE_ROLES)),
+) -> RecurringLineItemRead:
+    organization_id = _require_org(user)
+    return await service.create_recurring_item(
+        organization_id, user_id, payload.type, payload.category, payload.label, payload.amount
+    )
+
+
+@router.patch(
+    "/recurring-line-items/{item_id}",
+    response_model=RecurringLineItemRead,
+    summary="Update a recurring line item",
+)
+async def update_recurring_line_item(
+    item_id: UUID,
+    payload: RecurringLineItemUpdate,
+    service: PayrollService = Depends(get_payroll_service),
+    user: User = Depends(require_role(*MANAGE_ROLES)),
+) -> RecurringLineItemRead:
+    item = await service.get_recurring_item(item_id, organization_id=scoped_org_id(user))
+    if item is None:
+        raise HTTPException(status_code=404, detail="Recurring line item not found")
+    return await service.update_recurring_item(item, payload.model_dump(exclude_unset=True))
+
+
+@router.delete(
+    "/recurring-line-items/{item_id}",
+    response_model=RecurringLineItemRead,
+    summary="Deactivate a recurring line item",
+)
+async def deactivate_recurring_line_item(
+    item_id: UUID,
+    service: PayrollService = Depends(get_payroll_service),
+    user: User = Depends(require_role(*MANAGE_ROLES)),
+) -> RecurringLineItemRead:
+    item = await service.get_recurring_item(item_id, organization_id=scoped_org_id(user))
+    if item is None:
+        raise HTTPException(status_code=404, detail="Recurring line item not found")
+    return await service.deactivate_recurring_item(item)
 
 
 @router.get("/users/{user_id}/payslips", response_model=PayslipList, summary="An employee's payslip history")
